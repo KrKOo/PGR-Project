@@ -121,24 +121,43 @@ class Camera:
         self.aspect_ratio = aspect_ratio
         self.aperture = aperture
         self.focal_length = focal_length
-        self.distortion = -0.5
+        self.distortion = 5000
+
+    def apply_distortion(self, x, y):
+        # Convert to normalized screen coordinates
+        r = np.sqrt(x**2 + y**2)
+        if r == 0:
+            return x, y
+
+        # Apply radial distortion
+        k1, k2 = 0.8,0.05
+        r_distorted = r * (1 + k1 * r**2 + k2 * r**4)
+        
+        # Scale back to distorted coordinates
+        x_distorted = x * (r_distorted / r)
+        y_distorted = y * (r_distorted / r)
+        return x_distorted, y_distorted
 
     def get_ray(self, x, y):
+        x, y = self.apply_distortion(x, y)
+
         # Simulácia clony
         radius = self.aperture / 2
-        random_point = radius * np.random.rand(2) * np.array([np.cos(2 * np.pi * np.random.rand()), np.sin(2 * np.pi * np.random.rand())])
-        offset = np.array([random_point[0], random_point[1], 0])
+        random_point = radius * np.random.rand(2) * np.array([
+            np.cos(2 * np.pi * np.random.rand()), 
+            np.sin(2 * np.pi * np.random.rand())
+        ])
 
+        offset = np.array([random_point[0], random_point[1], 0])
         direction = normalize(np.array([x, y, 0]) - self.position)
 
         # Depth of field
         focus_point = self.position + self.focal_length * direction
         direction = focus_point - (self.position + offset)
 
-        #r = np.linalg.norm(direction)
-        #direction = direction * (1 + self.distortion * r**2)
+        # direction += wavelength_shift * np.array([np.random.uniform(-1, 1), np.random.uniform(-1, 1), 0])
 
-        return (self.position + offset, normalize(direction))
+        return (self.position + offset, direction)
 
 class RayTracer:
     def __init__(self, width, height, scene):
@@ -153,7 +172,7 @@ class RayTracer:
             direction=np.array([0, -0.35, 1]),  # Smer pohľadu kamery
             fov=90,
             aspect_ratio=float(width) / height,
-            aperture=0,
+            aperture=0.2,
             focal_length=2,
         )
         self.screen_bounds = (-1., -1. / self.camera.aspect_ratio + .25, 1., 1. / self.camera.aspect_ratio + .25)
@@ -172,7 +191,7 @@ class RayTracer:
         object_color = closest_object.material.color
         view_direction = normalize(self.camera.position - intersection_point)
         
-        color_at_ray = 0
+        color_at_ray = np.zeros(3)
 
         for light in self.scene.lights:
             light_direction = normalize(light.position - intersection_point)
@@ -194,26 +213,38 @@ class RayTracer:
     
     def render(self):
         image = np.zeros((self.height, self.width, 3))
+        center_x, center_y = self.width / 2, self.height / 2
+        max_radius = np.sqrt(center_x**2 + center_y**2)
+        vignetting_strength = 0.8  # Controls the intensity of vignetting
+        vignetting_exponent = 2   # Controls the sharpness of the effect
+
         for i, x in enumerate(np.linspace(self.screen_bounds[0], self.screen_bounds[2], self.width)):
             if i % 10 == 0:
-                print(i / float(self.width) * 100)
+                print(f"Rendering: {i / float(self.width) * 100:.2f}%")
             for j, y in enumerate(np.linspace(self.screen_bounds[1], self.screen_bounds[3], self.height)):
                 
                 col = np.zeros(3)
                 for _ in range(self.samples_per_pixel):
                     ray_origin, ray_direction = self.camera.get_ray(x, y)
                     depth = 0
-                    reflection = 1.
+                    reflection = 1.0
                     while depth < self.max_depth:
                         traced = self.trace_ray(ray_origin, ray_direction)
                         if not traced:
                             break
                         obj, M, N, col_ray = traced
-                        ray_origin, ray_direction = M + N * .0001, normalize(ray_direction - 2 * np.dot(ray_direction, N) * N)
+                        ray_origin, ray_direction = M + N * 0.0001, normalize(ray_direction - 2 * np.dot(ray_direction, N) * N)
                         depth += 1
                         col += reflection * col_ray
                         reflection *= obj.material.reflection
-                image[self.height - j - 1, i, :] = np.clip(col/self.samples_per_pixel, 0, 1)
+
+                # Calculate vignetting factor
+                pixel_radius = np.sqrt((i - center_x)**2 + (j - center_y)**2) / max_radius
+                vignette_factor = 1 - vignetting_strength * (pixel_radius**vignetting_exponent)
+                vignette_factor = max(0, vignette_factor)
+
+                # Apply vignetting to pixel color
+                image[self.height - j - 1, i, :] = np.clip(col * vignette_factor / self.samples_per_pixel, 0, 1)
 
         return image
 
