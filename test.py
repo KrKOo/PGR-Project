@@ -138,27 +138,24 @@ class Camera:
         y_distorted = y * (r_distorted / r)
         return x_distorted, y_distorted
 
-    def get_ray(self, x, y):
+    def get_ray(self, x, y, wavelength_shift=0):
         x, y = self.apply_distortion(x, y)
 
-        # Simulácia clony
         radius = self.aperture / 2
         random_point = radius * np.random.rand(2) * np.array([
             np.cos(2 * np.pi * np.random.rand()), 
             np.sin(2 * np.pi * np.random.rand())
         ])
-
         offset = np.array([random_point[0], random_point[1], 0])
-        direction = normalize(np.array([x, y, 0]) - self.position)
+
+        # Adjust direction for chromatic aberration
+        adjusted_direction = normalize(np.array([x + wavelength_shift, y + wavelength_shift, 0]) - self.position)
 
         # Depth of field
-        focus_point = self.position + self.focal_length * direction
-        direction = focus_point - (self.position + offset)
+        focus_point = self.position + self.focal_length * adjusted_direction
+        adjusted_direction = normalize(focus_point - (self.position + offset))
 
-        # direction += wavelength_shift * np.array([np.random.uniform(-1, 1), np.random.uniform(-1, 1), 0])
-
-        return (self.position + offset, direction)
-
+        return (self.position + offset, adjusted_direction)
 class RayTracer:
     def __init__(self, width, height, scene):
         self.width = width
@@ -166,7 +163,7 @@ class RayTracer:
         self.scene = scene
         self.specular_exponent = 50
         self.max_depth = 3
-        self.samples_per_pixel = 1
+        self.samples_per_pixel = 3
         self.camera = Camera(
             position=np.array([0., 0.35, -1]),
             direction=np.array([0, -0.35, 1]),  # Smer pohľadu kamery
@@ -213,6 +210,7 @@ class RayTracer:
     
     def render(self):
         image = np.zeros((self.height, self.width, 3))
+        wavelength_shifts = [0.002, 0.0, -0.002]
         center_x, center_y = self.width / 2, self.height / 2
         max_radius = np.sqrt(center_x**2 + center_y**2)
         vignetting_strength = 0.8  # Controls the intensity of vignetting
@@ -222,28 +220,29 @@ class RayTracer:
             if i % 10 == 0:
                 print(f"Rendering: {i / float(self.width) * 100:.2f}%")
             for j, y in enumerate(np.linspace(self.screen_bounds[1], self.screen_bounds[3], self.height)):
-                
+
                 col = np.zeros(3)
                 for _ in range(self.samples_per_pixel):
-                    ray_origin, ray_direction = self.camera.get_ray(x, y)
-                    depth = 0
-                    reflection = 1.0
-                    while depth < self.max_depth:
-                        traced = self.trace_ray(ray_origin, ray_direction)
-                        if not traced:
-                            break
-                        obj, M, N, col_ray = traced
-                        ray_origin, ray_direction = M + N * 0.0001, normalize(ray_direction - 2 * np.dot(ray_direction, N) * N)
-                        depth += 1
-                        col += reflection * col_ray
-                        reflection *= obj.material.reflection
+                    # Trace separate rays for red, green, and blue
+                    for k, shift in enumerate(wavelength_shifts):
+                        ray_origin, ray_direction = self.camera.get_ray(x, y, wavelength_shift=shift)
+                        depth = 0
+                        reflection = 1.0
+                        while depth < self.max_depth:
+                            traced = self.trace_ray(ray_origin, ray_direction)
+                            if not traced:
+                                break
+                            obj, M, N, col_ray = traced
+                            ray_origin, ray_direction = M + N * 0.0001, normalize(ray_direction - 2 * np.dot(ray_direction, N) * N)
+                            depth += 1
+                            col[k] += reflection * col_ray[k]
+                            reflection *= obj.material.reflection
 
                 # Calculate vignetting factor
                 pixel_radius = np.sqrt((i - center_x)**2 + (j - center_y)**2) / max_radius
                 vignette_factor = 1 - vignetting_strength * (pixel_radius**vignetting_exponent)
                 vignette_factor = max(0, vignette_factor)
-
-                # Apply vignetting to pixel color
+                # Average color over samples
                 image[self.height - j - 1, i, :] = np.clip(col * vignette_factor / self.samples_per_pixel, 0, 1)
 
         return image
@@ -260,8 +259,8 @@ scene.add_object(Plane([0., -.5, 0.], Material([1., 1., 1.], .25), [0., 1., 0.])
 scene.add_light(Light([0., 5., -10.], np.ones(3)))
 # scene.add_light(Light([10., 5., 10.],np.ones(3)))
 
-rayTracer = RayTracer(400, 300, scene)
+rayTracer = RayTracer(1920, 1080, scene)
 
 image = rayTracer.render()
 
-plt.imsave('fig4.png', image)
+plt.imsave('fig5.png', image)
