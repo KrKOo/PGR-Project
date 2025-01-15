@@ -114,14 +114,14 @@ class Scene:
         self.lights.append(light)
 
 class Camera:
-    def __init__(self, position, direction, fov, aspect_ratio, aperture, focal_length):
+    def __init__(self, position, direction, fov, aspect_ratio, aperture, focal_length, distortion_coefficients):
         self.position = np.array(position)
         self.direction = np.array(direction)
         self.fov = fov
         self.aspect_ratio = aspect_ratio
         self.aperture = aperture
         self.focal_length = focal_length
-        self.distortion = 5000
+        self.distortion_coefficients = distortion_coefficients
 
     def apply_distortion(self, x, y):
         # Convert to normalized screen coordinates
@@ -130,7 +130,8 @@ class Camera:
             return x, y
 
         # Apply radial distortion
-        k1, k2 = 0.8,0.05
+        k1, k2 = self.distortion_coefficients
+
         r_distorted = r * (1 + k1 * r**2 + k2 * r**4)
         
         # Scale back to distorted coordinates
@@ -163,7 +164,7 @@ class RayTracer:
         self.scene = scene
         self.specular_exponent = 50
         self.max_depth = 3
-        self.samples_per_pixel = 3
+        self.samples_per_pixel = 5
         self.camera = Camera(
             position=np.array([0., 0.35, -1]),
             direction=np.array([0, -0.35, 1]),  # Smer pohľadu kamery
@@ -171,6 +172,7 @@ class RayTracer:
             aspect_ratio=float(width) / height,
             aperture=0.2,
             focal_length=2,
+            distortion_coefficients=[0.8, 0.05]
         )
         self.screen_bounds = (-1., -1. / self.camera.aspect_ratio + .25, 1., 1. / self.camera.aspect_ratio + .25)
         
@@ -263,4 +265,4 @@ rayTracer = RayTracer(1920, 1080, scene)
 
 image = rayTracer.render()
 
-plt.imsave('fig5.png', image)
+plt.imsave('fig7.png', image)
