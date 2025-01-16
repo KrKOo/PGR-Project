@@ -28,8 +28,6 @@ class Camera:
     def apply_distortion(self, x: np.array, y: np.array):
         # Convert to normalized screen coordinates
         r = np.sqrt(x**2 + y**2)
-        # if r == 0:
-        #     return x, y
 
         # Apply radial distortion
         k1, k2 = self.distortion_coefficients

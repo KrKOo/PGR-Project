@@ -54,39 +54,56 @@ class RayTracer:
             color_at_ray += closest_object.material.specular_coefficient * max(np.dot(normal_at_intersection, normalize(light_direction + view_direction)), 0) ** closest_object.material.specular_exponent * light.color
         
         return closest_object, intersection_point, normal_at_intersection, color_at_ray
+
+    
+    def get_vignette_factor(self, x: float, y: float):
+        center_screen_x = (self.screen_bounds[0] + self.screen_bounds[2]) / 2
+        center_screen_y = (self.screen_bounds[1] + self.screen_bounds[3]) / 2
+        max_radius = np.sqrt(
+            ((self.screen_bounds[2] - self.screen_bounds[0]) / 2)**2 +
+            ((self.screen_bounds[3] - self.screen_bounds[1]) / 2)**2
+        )
+        
+        dx = (x - center_screen_x)
+        dy = (y - center_screen_y)
+        pixel_radius = np.sqrt(dx**2 + dy**2) / max_radius
+
+        vignette_factor = 1 - self.camera.vignetting_strength * (pixel_radius**self.camera.vignetting_exponent)
+
+        return max(0, vignette_factor)
+    
+        
+    def get_pixel_color(self, x: float, y: float):
+        col = np.zeros(3)
+        for _ in range(self.samples_per_pixel):
+            for k, shift in enumerate(self.camera.wavelength_shifts):
+                ray_origin, ray_direction = self.camera.get_ray(x, y, wavelength_shift=shift)
+                depth = 0
+                reflection = 1.0
+                while depth < self.max_depth:
+                    traced = self.trace_ray(ray_origin, ray_direction)
+                    if not traced:
+                        break
+                    obj, M, N, col_ray = traced
+                    ray_origin, ray_direction = M + N * 0.0001, normalize(ray_direction - 2 * np.dot(ray_direction, N) * N)
+                    depth += 1
+                    col[k] += reflection * col_ray[k]
+                    reflection *= obj.material.reflection
+
+        # apply vignetting
+        vignette_factor = self.get_vignette_factor(x, y)
+
+        return np.clip(col * vignette_factor / self.samples_per_pixel, 0, 1)
+        
     
     def render(self):
         image = np.zeros((self.height, self.width, 3))
-        center_x, center_y = self.width / 2, self.height / 2
-        max_radius = np.sqrt(center_x**2 + center_y**2)
 
         for i, x in enumerate(np.linspace(self.screen_bounds[0], self.screen_bounds[2], self.width)):
             if i % 10 == 0:
                 print(f"Rendering: {i / float(self.width) * 100:.2f}%")
+
             for j, y in enumerate(np.linspace(self.screen_bounds[1], self.screen_bounds[3], self.height)):
-
-                col = np.zeros(3)
-                for _ in range(self.samples_per_pixel):
-                    # Trace separate rays for red, green, and blue
-                    for k, shift in enumerate(self.camera.wavelength_shifts):
-                        ray_origin, ray_direction = self.camera.get_ray(x, y, wavelength_shift=shift)
-                        depth = 0
-                        reflection = 1.0
-                        while depth < self.max_depth:
-                            traced = self.trace_ray(ray_origin, ray_direction)
-                            if not traced:
-                                break
-                            obj, M, N, col_ray = traced
-                            ray_origin, ray_direction = M + N * 0.0001, normalize(ray_direction - 2 * np.dot(ray_direction, N) * N)
-                            depth += 1
-                            col[k] += reflection * col_ray[k]
-                            reflection *= obj.material.reflection
-
-                # Calculate vignetting factor
-                pixel_radius = np.sqrt((i - center_x)**2 + (j - center_y)**2) / max_radius
-                vignette_factor = 1 - self.camera.vignetting_strength * (pixel_radius**self.camera.vignetting_exponent)
-                vignette_factor = max(0, vignette_factor)
-                # Average color over samples
-                image[self.height - j - 1, i, :] = np.clip(col * vignette_factor / self.samples_per_pixel, 0, 1)
+                image[self.height - j - 1, i] = self.get_pixel_color(x, y)
 
         return image
