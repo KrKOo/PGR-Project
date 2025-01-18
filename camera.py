@@ -25,7 +25,7 @@ class Camera:
         self.vignetting_strength = vignetting_strength
         self.vignetting_exponent = vignetting_exponent
 
-    def apply_distortion(self, x: np.array, y: np.array):
+    def apply_distortion(self, x: float, y: float):
         # Convert to normalized screen coordinates
         r = np.sqrt(x**2 + y**2)
 
@@ -39,7 +39,7 @@ class Camera:
         y_distorted = y * (r_distorted / r)
         return x_distorted, y_distorted
 
-    def get_ray(self, x: np.array, y: np.array, wavelength_shift: float = 0):
+    def get_ray(self, x: float, y: float, wavelength_shift: float = 0):
         x, y = self.apply_distortion(x, y)
 
         radius = self.aperture / 2
